@@ -1,41 +1,66 @@
 import cv2
 import numpy as np
+import datetime
 
-# Abre a câmera padrão (geralmente a webcam)
+# Fator de conversão: 1 pixel = 0.5 mm (ajuste conforme sua calibração real)
+SCALE_MM_PER_PIXEL = 0.5
+
+# Altura da mesa em mm (eixo Z), se o braço pegar sobre a superfície
+Z_FIXED_MM = 0
+
+# Nome do arquivo de saída
+output_file = "coordenadas_para_braco.txt"
+
+# Abre a câmera (use 0 ou 1 dependendo da sua webcam)
 cap = cv2.VideoCapture(0)
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+# Abre o arquivo de saída
+with open(output_file, 'w') as file:
+    file.write("X_mm,Y_mm,Z_mm,timestamp\n")
 
-    # Redimensiona o frame (opcional, para melhorar performance)
-    frame = cv2.resize(frame, (640, 480))
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    # Converte para escala de cinza e aplica um desfoque
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        frame = cv2.resize(frame, (640, 480))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blur, 50, 150)
 
-    # Detecta bordas
-    edges = cv2.Canny(blur, 50, 150)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Encontra contornos
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area > 1000:
+                x, y, w, h = cv2.boundingRect(cnt)
 
-    # Filtra contornos por tamanho (ajuste os valores conforme sua cena)
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area > 1000:  # você pode ajustar esse valor
-            x, y, w, h = cv2.boundingRect(cnt)
-            # Exibe os contornos como objetos detectados
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                # Coordenadas do centro do objeto em pixels
+                cx_pixel = x + w // 2
+                cy_pixel = y + h // 2
 
-    # Exibe a imagem final
-    cv2.imshow("Objetos sobre a mesa", frame)
+                # Conversão para milímetros
+                x_mm = cx_pixel * SCALE_MM_PER_PIXEL
+                y_mm = cy_pixel * SCALE_MM_PER_PIXEL
+                z_mm = Z_FIXED_MM
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+                # Timestamp atual
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# Libera a câmera e fecha as janelas
+                # Escreve no arquivo
+                file.write(f"{x_mm:.2f},{y_mm:.2f},{z_mm},{timestamp}\n")
+
+                # Desenha o retângulo e centro na tela
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                cv2.circle(frame, (cx_pixel, cy_pixel), 5, (0, 0, 255), -1)
+                cv2.putText(frame, f"{x_mm:.1f} mm, {y_mm:.1f} mm", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+
+        cv2.imshow("Deteccao para braco", frame)
+
+        # Pressione Q para sair
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
 cap.release()
 cv2.destroyAllWindows()
